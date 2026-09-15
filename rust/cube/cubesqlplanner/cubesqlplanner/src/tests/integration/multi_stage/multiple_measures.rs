@@ -106,6 +106,44 @@ async fn test_rank_and_regular_multi_stage() {
     }
 }
 
+/// Regression: multi-stage ratio (mom_growth) + regular sum (total_amount) +
+/// non-time dimension must not NULL-out the regular measure on Keys FKA path
+/// (MySQL/GBase dialects without FULL JOIN).
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mom_growth_with_regular_measure_and_dimension() {
+    let ctx = create_context();
+
+    let query = indoc! {r#"
+        measures:
+          - orders.mom_growth
+          - orders.total_amount
+        dimensions:
+          - orders.category
+        time_dimensions:
+          - dimension: orders.created_at
+            granularity: month
+            dateRange:
+              - "2024-01-01"
+              - "2024-03-31"
+        order:
+          - id: orders.category
+    "#};
+
+    let sql = ctx.build_sql(query).unwrap();
+    assert!(
+        !sql.contains("fk_aggregate_keys"),
+        "regular + multi-stage with dimensions should use regular-first join, not UNION keys"
+    );
+    assert!(
+        sql.contains("LEFT JOIN"),
+        "multi-stage branch should LEFT JOIN to the regular measure anchor"
+    );
+
+    if let Some(result) = ctx.try_execute_pg(query, SEED).await {
+        insta::assert_snapshot!(result);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_three_multi_stage_types() {
     let ctx = create_context();

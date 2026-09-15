@@ -159,7 +159,10 @@ impl FullKeyAggregateStrategy for KeysFullKeyAggregateStrategy<'_> {
             // without it the measure ref already has all key_dims.
             let conditions = key_dims
                 .iter()
-                .filter(|d| Self::dim_in_schema(query_logical_schema.as_ref(), d))
+                .filter(|d| {
+                    !has_explicit_keys
+                        || Self::dim_in_schema(query_logical_schema.as_ref(), d)
+                })
                 .map(|dim| -> Result<_, CubeError> {
                     let alias_in_keys = keys_select.schema().resolve_member_alias(dim);
                     let keys_ref_expr = Expr::Reference(QualifiedColumnName::new(

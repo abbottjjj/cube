@@ -7,6 +7,7 @@ use crate::physical_plan::{
 use crate::physical_plan_builder::PhysicalPlanBuilder;
 use crate::planner::collectors::collect_calc_group_dims_from_nodes;
 use crate::planner::get_filtered_values;
+use crate::planner::MemberSymbol;
 use cubenativeutils::CubeError;
 use itertools::Itertools;
 use std::rc::Rc;
@@ -43,16 +44,19 @@ impl<'a> LogicalNodeProcessor<'a, Query> for QueryProcessor<'a> {
         context.remove_multi_stage_dimensions();
 
         //FIXME This is hack but good solution require refactor
-        let resolved_multistage_dimension =
-            if let QuerySource::FullKeyAggregate(fk_source) = logical_plan.source() {
-                if let Some(first_cte_ref) = fk_source.multi_stage_subquery_refs().first() {
-                    first_cte_ref.schema().multi_stage_dimensions()?
-                } else {
-                    vec![]
+        let mut resolved_multistage_dimension = vec![];
+        if let QuerySource::FullKeyAggregate(fk_source) = logical_plan.source() {
+            for cte_ref in fk_source.multi_stage_subquery_refs().iter() {
+                for dim in cte_ref.schema().multi_stage_dimensions()? {
+                    if resolved_multistage_dimension
+                        .iter()
+                        .all(|d: &Rc<MemberSymbol>| d.full_name() != dim.full_name())
+                    {
+                        resolved_multistage_dimension.push(dim);
+                    }
                 }
-            } else {
-                vec![]
-            };
+            }
+        }
         for member in logical_plan.schema().multi_stage_dimensions()? {
             if resolved_multistage_dimension
                 .iter()

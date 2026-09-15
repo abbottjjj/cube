@@ -17,31 +17,51 @@ import { BaseMeasure } from './BaseMeasure';
 import { BaseTimeDimension } from './BaseTimeDimension';
 import { MysqlQuery } from './MysqlQuery';
 
-const SESSION_TIMEZONE_PATTERN = /@@session\.time_zone/gi;
-
 const DIGITS_0_TO_9 = '(SELECT 0 AS i UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)';
 
 export class GBaseQuery extends MysqlQuery {
-  private sessionTimezoneLiteral(): string {
-    return "'+00:00'";
-  }
-
-  private withoutSessionTimeZone(sql: string): string {
-    return sql.replace(SESSION_TIMEZONE_PATTERN, this.sessionTimezoneLiteral());
-  }
-
+  /**
+   * GBase 未加载 mysql.time_zone 表时 CONVERT_TZ 对任意参数均返回 NULL；
+   * 连接已在 driver 中 SET time_zone，无需再转换。
+   */
   public convertTz(field: string) {
-    return this.withoutSessionTimeZone(super.convertTz(field));
-  }
-
-  public timeStampCast(value: string) {
-    return this.withoutSessionTimeZone(super.timeStampCast(value));
+    return field;
   }
 
   /**
-   * GBase MPP 在半累加 CTE / q_0 中间层上执行 LIMIT 会导致结果集截断为 1 行。
-   * 与 {@link DmQuery#groupByDimensionLimit} 相同：仅最外层保留 rowLimit。
+   * 避免 TIMESTAMP(convert_tz(...)) 在 GBase 上整列变 NULL。
    */
+  public timeStampCast(value: string) {
+    return `TIMESTAMP(${value})`;
+  }
+
+  /**
+   * GBase CAST AS DATETIME 不能可靠解析 ISO `2024-01-01T00:00:00.000`，
+   * 日粒度用 DATE()，其它粒度用空格分隔的 datetime 字面量。
+   */
+  public override timeGroupedColumn(granularity: string, dimension: string) {
+    switch (granularity) {
+      case 'day':
+        return `CAST(DATE(${dimension}) AS DATETIME)`;
+      case 'month':
+        return `CAST(DATE_FORMAT(${dimension}, '%Y-%m-01 00:00:00') AS DATETIME)`;
+      case 'year':
+        return `CAST(DATE_FORMAT(${dimension}, '%Y-01-01 00:00:00') AS DATETIME)`;
+      case 'hour':
+        return `CAST(DATE_FORMAT(${dimension}, '%Y-%m-%d %H:00:00') AS DATETIME)`;
+      case 'minute':
+        return `CAST(DATE_FORMAT(${dimension}, '%Y-%m-%d %H:%i:00') AS DATETIME)`;
+      case 'second':
+        return `CAST(DATE_FORMAT(${dimension}, '%Y-%m-%d %H:%i:%S') AS DATETIME)`;
+      case 'week': {
+        const weekStart = `DATE_ADD('1900-01-01', INTERVAL TIMESTAMPDIFF(WEEK, '1900-01-01', ${dimension}) WEEK)`;
+        return `CAST(DATE_FORMAT(${weekStart}, '%Y-%m-%d 00:00:00') AS DATETIME)`;
+      }
+      default:
+        return super.timeGroupedColumn(granularity, dimension);
+    }
+  }
+
   public override groupByDimensionLimit() {
     if (this.options.disableExternalPreAggregations) {
       return '';

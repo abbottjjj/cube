@@ -31,6 +31,27 @@ cubes:
     await compilers.compiler.compile();
   });
 
+  it('day granularity avoids CONVERT_TZ and ISO-T datetime cast', async () => {
+    const query = new GBaseQuery(
+      { joinGraph: compilers.joinGraph, cubeEvaluator: compilers.cubeEvaluator, compiler: compilers.compiler },
+      {
+        measures: ['metrics_facts.trx_amount_flow'],
+        timeDimensions: [{
+          dimension: 'metrics_facts.stat_dt',
+          granularity: 'day',
+        }],
+        order: [{ id: 'metrics_facts.stat_dt' }],
+        timezone: 'UTC',
+        useNativeSqlPlanner: false,
+      },
+    );
+
+    const [sql] = query.buildSqlAndParams();
+    expect(sql).not.toMatch(/CONVERT_TZ/i);
+    expect(sql).not.toMatch(/T00:00:00\.000/);
+    expect(sql).toMatch(/CAST\s*\(\s*DATE\s*\(/i);
+  });
+
   it('replaces @@session.time_zone in convertTz SQL', async () => {
     const query = new GBaseQuery(
       { joinGraph: compilers.joinGraph, cubeEvaluator: compilers.cubeEvaluator, compiler: compilers.compiler },

@@ -1,6 +1,7 @@
 mod full_join_aggregate_strategy;
 mod inner_join_aggregate_strategy;
 mod keys_aggregate_strategy;
+mod regular_first_aggregate_strategy;
 
 use super::super::{LogicalNodeProcessor, ProcessableNode, PushDownBuilderContext};
 use crate::logical_plan::FullKeyAggregate;
@@ -10,6 +11,7 @@ use cubenativeutils::CubeError;
 use full_join_aggregate_strategy::FullJoinFullKeyAggregateStrategy;
 use inner_join_aggregate_strategy::InnerJoinFullKeyAggregateStrategy;
 use keys_aggregate_strategy::KeysFullKeyAggregateStrategy;
+use regular_first_aggregate_strategy::RegularFirstFullKeyAggregateStrategy;
 use std::rc::Rc;
 
 trait FullKeyAggregateStrategy {
@@ -45,6 +47,8 @@ impl<'a> LogicalNodeProcessor<'a, FullKeyAggregate> for FullKeyAggregateProcesso
                 InnerJoinFullKeyAggregateStrategy::new(self.builder)
             } else if self.builder.templates().supports_full_join() {
                 FullJoinFullKeyAggregateStrategy::new(self.builder)
+            } else if RegularFirstFullKeyAggregateStrategy::should_use(full_key_aggregate) {
+                RegularFirstFullKeyAggregateStrategy::new(self.builder)
             } else {
                 KeysFullKeyAggregateStrategy::new(self.builder)
             };
